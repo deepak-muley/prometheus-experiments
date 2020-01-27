@@ -19,17 +19,33 @@ func main() {
 		Buckets: []float64{1, 2, 5, 6, 10}, //defining small buckets as this app should not take more than 1 sec to respond
 	}, []string{"code"}) // this will be partitioned by the HTTP code.
 
+	// https://godoc.org/github.com/prometheus/client_golang/prometheus
+	cpuTemp := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "cpu_temperature_celsius",
+		Help: "Current temperature of the CPU.",
+	})
+	hdFailures := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "hd_errors_total",
+			Help: "Number of hard-disk errors.",
+		},
+		[]string{"device"},
+	)
+
 	router := mux.NewRouter()
-	router.Handle("/sayhello/{name}", Sayhello(histogram))
+	router.Handle("/sayhello/{name}", Sayhello(histogram, cpuTemp, hdFailures))
 	router.Handle("/metrics", promhttp.Handler()) //Metrics endpoint for scrapping
 
 	//Registering the defined metric with Prometheus
 	prometheus.Register(histogram)
+	prometheus.MustRegister(cpuTemp)
+	prometheus.MustRegister(hdFailures)	
 
 	log.Fatal(http.ListenAndServe(":8009", router))
 }
 
-func Sayhello(histogram *prometheus.HistogramVec) http.HandlerFunc {
+// Sayhello : Demo
+func Sayhello(histogram *prometheus.HistogramVec, cpuTemp prometheus.Gauge, hdFailures *prometheus.CounterVec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		//monitoring how long it takes to respond
@@ -40,6 +56,8 @@ func Sayhello(histogram *prometheus.HistogramVec) http.HandlerFunc {
 		defer func() {
 			httpDuration := time.Since(start)
 			histogram.WithLabelValues(fmt.Sprintf("%d", code)).Observe(httpDuration.Seconds())
+			cpuTemp.Set(65.3)
+			hdFailures.With(prometheus.Labels{"device":"/dev/sda"}).Inc()
 		}()
 
 		code = http.StatusBadRequest // if req is not GET
